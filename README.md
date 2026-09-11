@@ -1,7 +1,7 @@
 # url-shortener
 
 긴 URL을 짧은 코드로 바꿔주는 웹 서비스입니다.
-애플리케이션 개발부터 컨테이너화 · 쿠버네티스 배포 · CI/CD · GitOps까지
+애플리케이션 개발부터 컨테이너화 · 쿠버네티스 배포 · CI/CD · GitOps · 모니터링까지
 배포 파이프라인 전체를 직접 구성했습니다.
 
 ## 동작
@@ -24,6 +24,9 @@ GET  /{code}                              →  원래 주소로 302 리다이렉
          Kubernetes (RKE2)
          ├── url-shortener  ×2  (Deployment + Service)
          └── postgres       ×1  (공용 데이터 저장소)
+                │
+                ▼
+         Prometheus ──▶ Grafana
 ```
 
 ## 기술 스택
@@ -38,6 +41,7 @@ GET  /{code}                              →  원래 주소로 302 리다이렉
 | CI | GitHub Actions |
 | CD | ArgoCD (GitOps) |
 | 레지스트리 | Docker Hub |
+| 모니터링 | Spring Boot Actuator, Micrometer, Prometheus, Grafana |
 
 ## 구축 과정
 
@@ -51,12 +55,13 @@ GET  /{code}                              →  원래 주소로 302 리다이렉
 | 4 | GitHub Actions로 이미지 빌드 · 푸시 자동화 |
 | 5 | ArgoCD Application 구성 (자동 동기화) |
 | 6 | PostgreSQL 연동 — Pod 간 데이터 공유 |
+| 7 | Actuator 기반 health probe, Prometheus 지표 수집 |
 
 ## 주요 설계 판단
 
 **멀티스테이지 빌드로 이미지 크기 절감**
 빌드에는 JDK와 Gradle이 필요하지만 실행에는 JRE와 jar 파일만 있으면 됩니다.
-빌드 단계와 실행 단계를 분리해 최종 이미지를 **169MB**로 줄였습니다.
+빌드 단계와 실행 단계를 분리해 최종 이미지를 169MB로 줄였습니다.
 
 **설정을 코드에서 분리**
 서비스 주소와 DB 접속 정보를 코드에 넣지 않고 환경변수로 주입합니다.
@@ -70,9 +75,16 @@ GET  /{code}                              →  원래 주소로 302 리다이렉
 DB 계정 정보는 Kubernetes Secret으로 분리하고,
 매니페스트에서는 `secretKeyRef`로 참조만 합니다.
 
-**probe와 리소스 제한 명시**
-readiness / liveness probe로 준비되지 않은 Pod에 트래픽이 가지 않도록 하고,
-requests / limits를 지정해 자원 할당을 예측 가능하게 했습니다.
+**probe를 실제 상태 기준으로 구성**
+처음에는 `tcpSocket`으로 포트 열림만 확인했으나, 앱이 DB 연결을 잃어도
+포트는 열려 있어 비정상 Pod에 트래픽이 갈 수 있었습니다.
+Actuator의 `/actuator/health/readiness`, `/liveness`를 사용하도록 바꿔
+DB 연결 상태까지 반영된 판정을 하도록 했습니다.
+또한 requests / limits를 지정해 자원 할당을 예측 가능하게 했습니다.
+
+**지표 수집**
+Micrometer로 Prometheus 형식 지표를 노출하고 ServiceMonitor로 등록해,
+요청 수 · 응답 시간 · JVM 상태가 30초 간격으로 수집됩니다.
 
 ## 직접 겪은 문제와 해결
 
@@ -82,7 +94,7 @@ H2 인메모리 DB를 쓰고 있어 각 Pod가 자기 메모리에만 데이터�
 A Pod에서 발급한 코드를 B Pod가 조회하면 없다고 응답했습니다.
 
 → PostgreSQL을 별도 Pod로 띄우고 두 Pod가 같은 DB를 보도록 변경했습니다.
-Pod별로 port-forward를 걸어 **A에서 발급한 코드를 B에서 조회해 302를 확인**했습니다.
+Pod별로 port-forward를 걸어 A에서 발급한 코드를 B에서 조회해 302를 확인했습니다.
 
 배운 점: 애플리케이션을 여러 개 띄우려면 상태를 애플리케이션 밖으로 빼야 합니다.
 
@@ -149,5 +161,5 @@ kubectl apply -f argocd/application.yaml
   운영 환경에서는 PVC 또는 관리형 DB가 필요합니다.
 - **배포 태그가 `latest`** — 커밋 해시 태그는 푸시하고 있으나 배포에는 사용하지 않고 있습니다.
   CI가 매니페스트의 이미지 태그를 갱신하도록 개선할 계획입니다.
-- **모니터링 미구성** — Prometheus 메트릭 노출과 대시보드 구성이 남아 있습니다.
+- **Grafana 대시보드 미구성** — 지표 수집은 되고 있으나 전용 대시보드는 만들지 않았습니다.
 - **외부 노출 미구성** — 현재 `port-forward`로만 접근합니다. Ingress 구성이 필요합니다.
