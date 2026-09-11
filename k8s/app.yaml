@@ -16,12 +16,27 @@ spec:
     spec:
       containers:
         - name: url-shortener
-          image: chosoowon/url-shortener:1.0
+          image: chosoowon/url-shortener:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8081
           env:
             - name: APP_BASE_URL
               value: "http://localhost:8081"
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres:5432/urlshort"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: "update"
           resources:
             requests:
               cpu: "100m"
@@ -32,12 +47,12 @@ spec:
           readinessProbe:
             tcpSocket:
               port: 8081
-            initialDelaySeconds: 15
+            initialDelaySeconds: 20
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
               port: 8081
-            initialDelaySeconds: 30
+            initialDelaySeconds: 40
             periodSeconds: 20
 ---
 apiVersion: v1
