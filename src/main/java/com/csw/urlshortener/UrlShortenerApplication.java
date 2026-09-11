@@ -1,6 +1,7 @@
 package com.csw.urlshortener;
 
 import jakarta.persistence.*;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -46,6 +47,9 @@ class UrlController {
     private final UrlRepository repo;
     private final Random random = new Random();
 
+    @Value("${app.base-url}")
+    private String baseUrl;
+
     UrlController(UrlRepository repo) {
         this.repo = repo;
     }
@@ -62,7 +66,7 @@ class UrlController {
         repo.save(url);
         return Map.of(
             "code", url.code,
-            "shortUrl", "http://localhost:8080/" + url.code
+            "shortUrl", baseUrl + "/" + url.code
         );
     }
 
